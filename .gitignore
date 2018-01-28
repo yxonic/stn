@@ -1,0 +1,11 @@
+data/
+ws/
+final/
+__pycache__/
+*.pyc
+.DS_Store
+.cache/
+.zcache/
+
+deploy.sh
+fetch.sh

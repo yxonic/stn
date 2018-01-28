@@ -1,0 +1,532 @@
+import time
+import logging
+from collections import deque
+
+import torch
+import torch.nn.functional as F
+from torch.nn.utils.rnn import *
+
+from . import dataprep
+from .rl import *
+from .util import *
+from .agent import *
+
+
+def train(model, args):
+    if args.snapshot is None:
+        start_epoch = 0
+    else:
+        epoch = args.snapshot
+        load_snapshot(model, args.workspace, epoch)
+        logging.info('Loaded ' + str(epoch))
+        start_epoch = int(epoch.split('.')[-1])
+
+    if args.spotlight_model == 'markov':
+        agent = MarkovPolicy(model.hidden_size + model.img_size + 3)
+    elif args.spotlight_model == 'rnn':
+        agent = RNNPolicy(model.hidden_size + model.img_size + 3, 32)
+    else:
+        agent = None
+
+    if args.focus is not None:
+        load_snapshot(agent, args.workspace, args.focus)
+        logging.info('Loaded ' + str(args.focus))
+
+    logging.info('Loading data...')
+    if args.dataset == 'melody':
+        data, cat = dataprep.get_melody()
+    elif args.dataset == 'formula':
+        data, cat = dataprep.get_formula()
+    else:
+        data, cat = dataprep.get_recog(args.dataset)
+    if args.split_frac > 0:
+        data, _ = data.split(args.split_frac)
+
+    if use_cuda:
+        model.cuda()
+        if agent:
+            agent.cuda()
+
+    optim = torch.optim.Adam(model.parameters(), weight_decay=0.05)
+    if agent:
+        agent_optim = torch.optim.Adam(agent.parameters(), weight_decay=0.05)
+
+    for epoch in range(start_epoch, args.epochs):
+        N = 0
+        loss = 0.
+        total_loss = 0.
+        n = 0
+        then = time.time()
+
+        for keys, item in data.shuffle().epoch(1, backend='torch'):
+            N += 1
+
+            sentence = item.y
+            L = sentence.size(1)
+
+            null = torch.zeros(1, 1).type_as(sentence)
+            beg = torch.zeros(1, 1).type_as(sentence) + 1
+            x = var(torch.cat([beg, sentence], dim=1)).permute(1, 0)
+            y_true = var(torch.cat([sentence, null], dim=1).permute(1, 0))
+
+            h, h_img, s = model.get_initial_state(var(item.file))
+
+            if agent:
+                sh = agent.default_h()
+                size = (h_img.size(0), h_img.size(1) * h_img.size(2),
+                        h_img.size(3))
+                c = torch.cat([h.squeeze(0),
+                               h_img.view(*size).max(1)[0],
+                               s], dim=1)
+
+            for i in range(L + 1):
+                n += 1
+                if agent:
+                    s_pred, sh = agent(s, var(c.data), sh)
+                    y_pred, h, alpha, c = model(x[i:i + 1, :],
+                                                h, h_img, s_pred)
+                else:
+                    y_pred, h, alpha = model(x[i:i + 1, :], h, h_img)
+                loss += F.cross_entropy(y_pred, y_true[i])
+
+            if N % args.batch_size == 0:
+                total_loss += loss.data[0]
+
+                optim.zero_grad()
+                if agent:
+                    agent_optim.zero_grad()
+                loss.backward()
+                optim.step()
+                if agent:
+                    agent_optim.step()
+
+                loss = 0.
+
+                now = time.time()
+                duration = (now - then) / 60
+                logging.info('[%d:%d] (%.2f samples/min) '
+                             'loss %.6f' %
+                             (epoch, N, args.batch_size / duration,
+                              total_loss / n))
+                then = now
+
+        save_snapshot(model, args.workspace, 'main.' + str(epoch + 1))
+        if agent:
+            save_snapshot(agent, args.workspace, 'agent.' + str(epoch + 1))
+
+
+def train_batched(model, args):
+    logging.info('model: %s, setup: %s' %
+                 (type(model).__name__, str(model.args)))
+
+    if args.dataset == 'melody':
+        data, _ = dataprep.get_melody()
+    else:
+        data, _ = dataprep.get_formula()
+
+    data, _ = data.split(args.split_frac)
+
+    optimizer = torch.optim.Adam(model.parameters(), weight_decay=1e-5)
+
+    start_epoch = load_last_snapshot(model, args.workspace)
+
+    if use_cuda:
+        model.cuda()
+
+    for epoch in range(start_epoch, args.epochs):
+        try:
+            logging.info(('epoch {}:'.format(epoch)))
+            N = len(data.keys)
+            n = 0
+            total_loss = 0.
+            then = time.time()
+            time_n = 0
+            for keys, item in data.shuffle().epoch(args.batch_size,
+                                                   backend='torch'):
+                sentences, lens = item.y
+
+                plens = [l + 1 for l in lens]
+
+                bz = len(keys)
+                nulls = torch.zeros(bz, 1).type_as(sentences)
+                begs = torch.zeros(bz, 1).type_as(sentences) + 1
+
+                x = var(torch.cat([begs, sentences],
+                                  dim=1)).permute(1, 0)
+                y_true = var(torch.cat([sentences, nulls],
+                                       dim=1)).permute(1, 0)
+                y_true_ = pack_padded_sequence(y_true, plens)
+
+                y_pred_ = model.pred_on_batch(var(item.file), x, plens)
+
+                loss = F.cross_entropy(y_pred_, y_true_.data)
+
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+                n += len(keys)
+                time_n += len(keys)
+                total_loss += loss.data[0] * len(keys)
+
+                now = time.time()
+                if now - then < 5:
+                    continue
+
+                duration = (now - then) / 60
+                logging.info('[%d:%d/%d] (%.2f samples/min) '
+                             'loss %.6f' %
+                             (epoch, n, N, time_n / duration,
+                              total_loss / n))
+                then = now
+                time_n = 0
+
+            save_snapshot(model, args.workspace, epoch + 1)
+
+        except KeyboardInterrupt as e:
+            save_snapshot(model, args.workspace, 'int')
+            raise e
+
+
+def test(model, args):
+    logging.info('model: %s, setup: %s' %
+                 (type(model).__name__, str(model.args)))
+
+    logging.info('Loading data...')
+    if args.dataset == 'melody':
+        data, cat = dataprep.get_melody()
+    elif args.dataset == 'formula':
+        data, cat = dataprep.get_formula()
+    else:
+        data, cat = dataprep.get_recog(args.dataset)
+    if args.split_frac > 0:
+        _, data = data.split(args.split_frac)
+
+    if args.snapshot is None:
+        epoch = load_last_snapshot(model, args.workspace)
+    else:
+        epoch = args.snapshot
+        load_snapshot(model, args.workspace, epoch)
+
+    if args.focus:
+        if args.spotlight_model == 'markov':
+            agent = MarkovPolicy(model.hidden_size + model.img_size + 3)
+        else:
+            agent = RNNPolicy(model.hidden_size + model.img_size + 3, 32)
+        load_snapshot(agent, args.workspace, args.focus)
+
+    logging.info('loaded model at epoch %s', str(epoch))
+
+    if use_cuda:
+        model.cuda()
+
+    N = len(data.keys)
+    n = 0
+    total_acc = 0.
+
+    for keys, item in data.shuffle().epoch(1, backend='torch'):
+        n += 1
+
+        sentence = item.y
+        L = sentence.size(1)
+
+        null = torch.zeros(1, 1).type_as(sentence)
+        beg = torch.zeros(1, 1).type_as(sentence) + 1
+
+        x = var(torch.cat([beg, sentence], dim=1), volatile=True).permute(1, 0)
+        y_true = torch.cat([sentence, null], dim=1).permute(1, 0)
+        y_pred = var(torch.zeros(L * 2 + 21, 1).type(torch.LongTensor))
+        img = var(item.file, volatile=True)
+        h, h_img, s = model.get_initial_state(img)
+
+        same = 0
+        y_ = x[0:1, :]
+
+        if args.focus:
+            sh = agent.default_h()
+            size = (h_img.size(0), h_img.size(1) * h_img.size(2),
+                    h_img.size(3))
+            c = torch.cat([h.squeeze(0),
+                           h_img.view(*size).max(1)[0],
+                           s], dim=1)
+
+        for i in range(L + 1):
+            if args.focus:
+                s, sh = agent(s, c, sh)
+                y_, h, alpha, c = model(y_, h, h_img, s)
+            else:
+                y_, h, _ = model(y_, h, h_img)
+            y_ = y_.max(1)[1]
+            y_pred[i, 0] = y_
+            same += y_.data[0] == y_true[i, 0]
+            y_ = y_.unsqueeze(0)
+
+        total_acc += same / (L + 1)
+        if n % 50 == 0 or n == len(data.keys):
+            logging.info('[%d/%d] acc %.6f' %
+                         (n, N, total_acc / n))
+
+
+def examine(model, args):
+    logging.info('model: %s, setup: %s' %
+                 (type(model).__name__, str(model.args)))
+
+    if args.snapshot is None:
+        epoch = load_last_snapshot(model, args.workspace)
+    else:
+        epoch = args.snapshot
+        load_snapshot(model, args.workspace, epoch)
+
+    if args.dataset == 'melody':
+        data, chars = dataprep.get_melody()
+    else:
+        data, chars = dataprep.get_formula()
+    _, data = data.split(0.9)
+
+    if args.focus:
+        if args.spotlight_model == 'markov':
+            agent = MarkovPolicy(model.hidden_size + model.img_size + 3)
+        else:
+            agent = RNNPolicy(model.hidden_size + model.img_size + 3, 32)
+        load_snapshot(agent, args.workspace, args.focus)
+
+    if use_cuda:
+        model.cuda()
+
+    n = 0
+
+    for keys, item in data.shuffle().epoch(1, backend='torch'):
+        if n == 50:
+            break
+        n += 1
+
+        sentence = item.y
+        L = sentence.size(1)
+
+        null = torch.zeros(1, 1).type_as(sentence)
+        beg = torch.zeros(1, 1).type_as(sentence) + 1
+
+        x = var(torch.cat([beg, sentence], dim=1), volatile=True).permute(1, 0)
+        y_true = torch.cat([sentence, null], dim=1).permute(1, 0)
+        y_pred = var(torch.zeros(L + 21, 1).type(torch.LongTensor))
+
+        h, h_img, s = model.get_initial_state(var(item.file, volatile=True))
+        if args.focus:
+            sh = agent.default_h()
+            size = (h_img.size(0), h_img.size(1) * h_img.size(2),
+                    h_img.size(3))
+            c = torch.cat([h.squeeze(0),
+                           h_img.view(*size).max(1)[0],
+                           s], dim=1)
+        if args.focus:
+            s, sh = agent(s, c, sh)
+            y_, h, alpha, c = model(x[0:1, :], h, h_img, s)
+        else:
+            y_, h, alpha = model(x[0:1, :], h, h_img)
+        y_pred[0, 0] = y_.squeeze().max(0)[1]
+
+        same = y_pred.data[0, 0] == y_true[0, 0]
+        for i in range(L + 20):
+            if args.focus:
+                s, sh = agent(s, c, sh)
+                y_, h, alpha, c = model(y_pred[i:i + 1, :], h, h_img, s)
+            else:
+                y_, h, alpha = model(y_pred[i:i + 1, :], h, h_img)
+            out = y_.squeeze().max(0)[1]
+            y_pred[i + 1, 0] = out
+            if same and out.data[0] != y_true[i + 1, 0]:
+                same = False
+            if out.data[0] == 0:
+                break
+
+        if same:
+            color = bcolors.OKGREEN
+        else:
+            color = bcolors.FAIL
+
+        print(colored('> ', bcolors.OKGREEN, True) +
+              ''.join(chars.get_original(y_true[:-1].squeeze())))
+        print(colored('< ', color, True) +
+              ''.join(chars.get_original(y_pred.squeeze()[:i + 1].data)))
+        print()
+
+
+def visualize(model, args):
+    if args.snapshot is None:
+        epoch = load_last_snapshot(model, args.workspace)
+    else:
+        epoch = args.snapshot
+        load_snapshot(model, args.workspace, epoch)
+    logging.info('Loaded epoch: ' + epoch)
+
+    if args.focus:
+        if args.spotlight_model == 'markov':
+            agent = MarkovPolicy(model.hidden_size + model.img_size + 3)
+        else:
+            agent = RNNPolicy(model.hidden_size + model.img_size + 3, 32)
+        load_snapshot(agent, args.workspace, args.focus)
+
+    cat = dataprep.get_cat(model.args.words)
+    img = dataprep.load_img(args.input).unsqueeze(0)
+    img = var(img, volatile=True)
+    h, h_img, s = model.get_initial_state(img)
+    if args.focus:
+        sh = agent.default_h()
+        size = (h_img.size(0), h_img.size(1) * h_img.size(2),
+                h_img.size(3))
+        c = torch.cat([h.squeeze(0),
+                       h_img.view(*size).max(1)[0],
+                       s], dim=1)
+    x = var(torch.zeros(1, 1).long() + 1)
+    import matplotlib.pyplot as plt
+
+    # print(next(model.focus_trans.parameters())[0].data.numpy())
+    for _ in range(20):
+        # y, h, alpha = model(x, h, h_img)
+        if args.focus:
+            s, sh = agent(s, c, sh)
+            y, h, alpha, c = model(x, h, h_img, s)
+        else:
+            y, h, alpha = model(x, h, h_img)
+
+        if args.focus:
+            v = torch.zeros(3)
+            v[:] = s.squeeze().data
+            v[2:] = torch.sigmoid(v[2:])
+            # v.clamp_(0, 1)
+            print(*v.numpy())
+        y = y.data.max(1)[1]
+        if y[0] == 0:
+            break
+        print(cat.get_original(y)[0])
+        plt.matshow(alpha[0].data.numpy())
+        x = var(y).unsqueeze(0)
+        plt.show()
+
+
+def reinforce(model, args):
+    logging.info('model: %s, setup: %s' %
+                 (type(model).__name__, str(model.args)))
+
+    # load pretrained model
+    if args.snapshot is None:
+        epoch = load_last_snapshot(model, args.workspace)
+    else:
+        epoch = args.snapshot
+        load_snapshot(model, args.workspace, epoch)
+    logging.info('Loaded epoch: ' + str(epoch))
+    logging.info('Loading data...')
+
+    if args.dataset == 'melody':
+        data, cat = dataprep.get_melody()
+    else:
+        data, cat = dataprep.get_formula()
+    data, _ = data.split(0.9)
+
+    learner = DDPG(model)
+
+    if use_cuda:
+        model.cuda()
+
+    for i in range(args.times):
+        logging.info('start %dth time', i)
+        learner.reinforce(data.shuffle(), cat)
+        save_snapshot(model, args.workspace, 'rf.' + str(i))
+        # TODO: validate
+
+
+# deprecated
+def pretrain_attention(model, args):
+    if args.snapshot is None:
+        epoch = load_last_snapshot(model, args.workspace)
+    else:
+        epoch = args.snapshot
+        load_snapshot(model, args.workspace, epoch)
+    logging.info('Loaded epoch: ' + str(epoch))
+
+    if args.spotlight_model == 'markov':
+        agent = MarkovPolicy(model.hidden_size + model.img_size + 3)
+    else:
+        agent = RNNPolicy(model.hidden_size + model.img_size + 3, 32)
+
+    logging.info('Loading data...')
+    if args.dataset == 'melody':
+        data, cat = dataprep.get_melody()
+    else:
+        data, cat = dataprep.get_formula()
+    data, _ = data.split(0.9)
+
+    if use_cuda:
+        model.cuda()
+        agent.cuda()
+
+    model.suspend_focus = True
+
+    optim = torch.optim.Adam(model.parameters(), weight_decay=1e-5)
+    agent_optim = torch.optim.Adam(agent.parameters(), weight_decay=1e-5)
+
+    for epoch in range(args.epochs):
+        N = 0
+        loss = 0.
+        agent_loss = 0.
+
+        total_loss = 0.
+        total_agent_loss = 0.
+        n = 0
+        then = time.time()
+
+        for keys, item in data.shuffle().epoch(1, backend='torch'):
+            N += 1
+
+            sentence = item.y
+            L = sentence.size(1)
+
+            null = torch.zeros(1, 1).type_as(sentence)
+            beg = torch.zeros(1, 1).type_as(sentence) + 1
+            x = var(torch.cat([beg, sentence], dim=1)).permute(1, 0)
+            y_true = var(torch.cat([sentence, null], dim=1).permute(1, 0))
+
+            h, h_img, s = model.get_initial_state(var(item.file))
+            sh = agent.default_h()
+
+            size = (h_img.size(0), h_img.size(1) * h_img.size(2),
+                    h_img.size(3))
+            c = torch.cat([h.squeeze(0),
+                           h_img.view(*size).max(1)[0],
+                           s], dim=1)
+
+            for i in range(L + 1):
+                n += 1
+                s_pred, sh = agent(s, var(c.data), sh)
+                y_pred, h, alpha, c = model(x[i:i + 1, :], h, h_img, 'get')
+                loss += F.cross_entropy(y_pred, y_true[i])
+
+                s = var(c[:, -3:].data)
+                agent_loss += F.smooth_l1_loss(s_pred, s)
+
+            if N % args.batch_size == 0:
+                total_loss += loss.data[0]
+                total_agent_loss += agent_loss.data[0]
+
+                optim.zero_grad()
+                loss.backward()
+                optim.step()
+
+                agent_optim.zero_grad()
+                agent_loss.backward()
+                agent_optim.step()
+
+                loss = 0.
+                agent_loss = 0.
+
+                now = time.time()
+                duration = (now - then) / 60
+                logging.info('[%d:%d] (%.2f samples/min) '
+                             'loss %.6f, agent_loss %.6f' %
+                             (epoch, N, args.batch_size / duration,
+                              total_loss / n,
+                              total_agent_loss / n))
+                then = now
+
+        save_snapshot(model, args.workspace, 'focus.' + str(epoch + 1))
+        save_snapshot(agent, args.workspace, 'agent.pre.' + str(epoch + 1))
