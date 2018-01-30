@@ -32,7 +32,8 @@ class RNNPolicy(nn.Module):
 
     def forward(self, s_, state, h_):
         _, h = self.rnn(s_.view(1, 1, 3), h_)
-        return self.pi(torch.cat([state, h.view(1, -1)], dim=1)), h
+        s = self.pi(torch.cat([state, h.view(1, -1)], dim=1))
+        return s, h
 
     def value(self, state, action, h):
         return self.q(torch.cat([state, h.view(1, -1), action], dim=1))

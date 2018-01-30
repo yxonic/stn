@@ -2,97 +2,131 @@ import torch
 import logging
 import torch.nn.functional as F
 import numpy as np
+import random
+
+from yata.fields import Categorical
 
 from .util import var, save_snapshot, progress, normalize
 
 
-class DDPG:
-    def __init__(self, model):
+class ActorCritic:
+    def __init__(self, model, seq_model, gamma=0.99, alpha=10.):
         self.model = model
-        self.gamma = 0.95
-        self.alpha = 100
-        self.warmup = 3
+        self.seq_model = seq_model
+        self.gamma = gamma
+        self.alpha = 10
+        self.exp_rate = 0.
 
-    @progress(print_every=1, logger=logging.getLogger())
-    def reinforce(self, data, chars, batch_size=8):
-        model = self.model
-        actor_optim = torch.optim.Adam(model.policy.parameters(),
-                                       weight_decay=0.1)
-        critic_optim = torch.optim.Adam(model.value.parameters(),
-                                        weight_decay=0.1)
+    @progress(print_every=32, logger=logging.getLogger())
+    def reinforce(self, data, chars, only_value=False):
+        if only_value:
+            params = self.model.value.parameters()
+        else:
+            params = filter(lambda p: p.requires_grad,
+                            self.model.parameters())
+        optimizer = torch.optim.Adam(params)
 
-        yield len(data.keys) // batch_size
-
+        yield len(data.keys)
         N = 0
-        n = 0
-        p_loss = 0.
-        v_loss = 0.
-        rs = []
-        for key, item in data.epoch(1, backend='torch'):
-            N += 1
+        saved = []
+        rewards = []
+
+        for key, item in data.shuffle().epoch(1, backend='torch'):
             L = item.y.size(1) * 2 + 20
+            h0 = self.model.get_initial_state(var(item.file))
+            for K in range(8):
+                N += 1
+                # explore
+                h = h0
+                x = var(torch.zeros(1, 1).long() + 1)
+                h_seq = self.seq_model.default_h()
 
-            sentence = item.y
-            L = sentence.size(1) + 1
+                ss = []
+                y_pred = [0] * L
+                for i in range(L):
+                    y, v, h_ = self.model(x, h)
+                    # y.data.clamp_(-5., 5.)
+                    # v.data.clamp_(-1., 1.)
 
-            null = torch.zeros(1, 1).type_as(sentence)
-            beg = torch.zeros(1, 1).type_as(sentence) + 1
+                    y_s, h_seq_ = self.seq_model(x, h_seq)
 
-            x = var(torch.cat([beg, sentence], dim=1),
-                    volatile=True).permute(1, 0)
-            y_true = var(torch.cat([sentence, null], dim=1).permute(1, 0))
+                    if random.random() < self.exp_rate:
+                        y = y_s
+                    # else:
+                    #     y += y_s
 
-            h, h_img, action = model.get_initial_state(var(item.file))
+                    probs = F.softmax(y.squeeze(), dim=0)
+                    dist = Categorical(probs)
+                    x_ = dist.sample()
+                    ss.append((dist.log_prob(x_), v.squeeze()))
+                    x_ = x_.data[0]
+                    y_pred[i] = x_
+                    if x_ == 0 or i == L - 1:
+                        break
+                    x = var(torch.LongTensor([[x_]]))
+                    h = h_  # var(h_.data)
+                    h_seq = h_seq_
 
-            # value = None
-            for i in range(L):
-                n += 1
-
-                # env state
-                y_, h, alpha, c = model(x[i:i + 1, :], h, h_img, action)
-                c.volatile = False
-
-                action = model.policy(c)
-                value_ = model.value(torch.cat([c, action],
-                                               dim=1)).view(1)
-
-                out = y_.data.squeeze().max(0)[1]
-                if out[0] == y_true.data[i, 0]:
-                    r = 1.
+                if i == 0:
+                    latex = ''
                 else:
-                    r = 0.
-                rs.append(r)
+                    # latex = ''.join(chars.get_original(y_pred[:i]))
+                    ws = chars.get_original(item.y.squeeze())
+                    tlatex = ws[0]
+                    w_ = ws[0]
+                    for w in ws[1:]:
+                        if w_.startswith('\\') and w.isalnum():
+                            tlatex += ' ' + w
+                        else:
+                            tlatex += w
+                        w_ = w
 
-                p_loss += value_
+                    ws = chars.get_original(y_pred[:i])
+                    latex = ws[0]
+                    w_ = ws[0]
+                    for w in ws[1:]:
+                        if w_.startswith('\\') and w.isalnum():
+                            latex += ' ' + w
+                        else:
+                            latex += w
+                        w_ = w
 
-                # if i > 0:
-                #     target_value = var((value_ * self.gamma + r).data)
-                #     v_loss += F.smooth_l1_loss(value, target_value)
-                # else:
-                # r = F.cross_entropy(y_.squeeze(1), y_true[i])
-                r = F.softmax(y_, dim=1).squeeze()[y_true[i]]
-                v_loss += F.smooth_l1_loss(value_, var(r.data))
+                r = get_return_pixel(latex, item.file)
+                yield [('return', r)]
+                R = r
+                rs = []
+                for i in range(len(ss)):
+                    rs.insert(0, R)
+                    R = self.gamma * R
 
-                # value = value_
+                saved.extend(ss)
+                rewards.extend(rs)
 
-            if N % batch_size == 0:
-                critic_optim.zero_grad()
-                v_loss.backward(retain_graph=True)
-                critic_optim.step()
+                if N % 3 == 0:
+                    print(tlatex, '\t<==>\t', latex, ':', r)
 
-                if self.warmup == 0:
-                    actor_optim.zero_grad()
-                    p_loss.backward()
-                    actor_optim.step()
+            if N % 32 == 0 or N == len(data.keys):
+                rewards = normalize(torch.Tensor(rewards))
 
-                yield [('ploss', p_loss.data[0] / n),
-                       ('vloss', v_loss.data[0] / n),
-                       ('reward', np.mean(rs))]
-
-                n = 0
                 p_loss = 0.
                 v_loss = 0.
-                rs = []
+                for (log, v), reward in zip(saved, rewards):
+                    advance = reward - v.data[0]
+                    p_loss += - log * advance
+                    v_loss += F.smooth_l1_loss(v, var(torch.Tensor([reward])))
 
-        if self.warmup > 0:
-            self.warmup -= 1
+                if only_value:
+                    loss = v_loss
+                else:
+                    loss = p_loss + self.alpha * v_loss
+
+                yield [('ploss', p_loss.data[0] / len(saved)),
+                       ('vloss', v_loss.data[0] / len(saved))]
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+                saved = []
+                rewards = []
+
+            self.exp_rate *= 0.9995

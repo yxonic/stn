@@ -47,14 +47,21 @@ def train(model, args):
         if agent:
             agent.cuda()
 
-    optim = torch.optim.Adam(model.parameters(), weight_decay=0.05)
     if agent:
-        agent_optim = torch.optim.Adam(agent.parameters(), weight_decay=0.05)
+        optim = torch.optim.Adam(model.parameters(),
+                                 weight_decay=args.norm)
+        agent_optim = torch.optim.Adam(agent.parameters(),
+                                       weight_decay=args.norm)
+    else:
+        optim = torch.optim.Adam(model.parameters(),
+                                 weight_decay=args.norm)
 
     for epoch in range(start_epoch, args.epochs):
         N = 0
         loss = 0.
+        agent_loss = 0.
         total_loss = 0.
+        total_agent_loss = 0.
         n = 0
         then = time.time()
 
@@ -82,32 +89,56 @@ def train(model, args):
             for i in range(L + 1):
                 n += 1
                 if agent:
-                    s_pred, sh = agent(s, var(c.data), sh)
-                    y_pred, h, alpha, c = model(x[i:i + 1, :],
-                                                h, h_img, s_pred)
+                    if len(item) == 5:
+                        if i != L:
+                            xx, yy = item.pos[0][i][1:-1].split(',')
+                            xx = float(xx)
+                            yy = float(yy)
+                            sigma = -3.
+                            s_true = torch.Tensor([[xx, yy, sigma]])
+                        else:
+                            s_true = s.data
+                        s_pred, sh = agent(s, var(c.data), sh)
+                        y_pred, h, alpha, c = model(x[i:i + 1, :],
+                                                    h, h_img, var(s_true))
+                        agent_loss += F.smooth_l1_loss(s_pred, var(s_true))
+                        s = var(s_true)
+                    else:
+                        s_pred, sh = agent(s, var(c.data), sh)
+                        y_pred, h, alpha, c = model(x[i:i + 1, :],
+                                                    h, h_img, s_pred)
+                        s = s_pred
                 else:
                     y_pred, h, alpha = model(x[i:i + 1, :], h, h_img)
                 loss += F.cross_entropy(y_pred, y_true[i])
 
             if N % args.batch_size == 0:
                 total_loss += loss.data[0]
+                if type(agent_loss) != float:
+                    total_agent_loss += agent_loss.data[0]
 
                 optim.zero_grad()
                 if agent:
                     agent_optim.zero_grad()
                 loss.backward()
+
+                if type(agent_loss) != float:
+                    agent_loss.backward()
+
                 optim.step()
                 if agent:
                     agent_optim.step()
 
                 loss = 0.
+                agent_loss = 0.
 
                 now = time.time()
                 duration = (now - then) / 60
                 logging.info('[%d:%d] (%.2f samples/min) '
-                             'loss %.6f' %
+                             'loss %.6f, agent_loss %.6f' %
                              (epoch, N, args.batch_size / duration,
-                              total_loss / n))
+                              total_loss / n,
+                              total_agent_loss / n))
                 then = now
 
         save_snapshot(model, args.workspace, 'main.' + str(epoch + 1))
@@ -126,7 +157,7 @@ def train_batched(model, args):
 
     data, _ = data.split(args.split_frac)
 
-    optimizer = torch.optim.Adam(model.parameters(), weight_decay=1e-5)
+    optimizer = torch.optim.Adam(model.parameters(), weight_decay=args.norm)
 
     start_epoch = load_last_snapshot(model, args.workspace)
 
@@ -143,7 +174,11 @@ def train_batched(model, args):
             time_n = 0
             for keys, item in data.shuffle().epoch(args.batch_size,
                                                    backend='torch'):
-                sentences, lens = item.y
+                if len(item.y) != 2:
+                    sentences = item.y
+                    lens = [item.y.size(1)] * item.y.size(0)
+                else:
+                    sentences, lens = item.y
 
                 plens = [l + 1 for l in lens]
 
@@ -250,21 +285,51 @@ def test(model, args):
                            h_img.view(*size).max(1)[0],
                            s], dim=1)
 
-        for i in range(L + 1):
+        true_seq = []
+        pred_seq = []
+        for i in range(L + 20):
             if args.focus:
                 s, sh = agent(s, c, sh)
                 y_, h, alpha, c = model(y_, h, h_img, s)
             else:
-                y_, h, _ = model(y_, h, h_img)
+                y_, h, _, _ = model(y_, h, h_img)
             y_ = y_.max(1)[1]
             y_pred[i, 0] = y_
-            same += y_.data[0] == y_true[i, 0]
+            if i <= L:
+                true_seq.append(y_true[i, 0])
+                same += y_.data[0] == y_true[i, 0]
+            pred_seq.append(y_.data[0])
             y_ = y_.unsqueeze(0)
-
-        total_acc += same / (L + 1)
+        total_acc += lcs(true_seq, pred_seq) / len(true_seq) \
+            if args.lcs else same / (L + 1)
         if n % 50 == 0 or n == len(data.keys):
             logging.info('[%d/%d] acc %.6f' %
                          (n, N, total_acc / n))
+
+
+def lcs(a, b):
+    lengths = [[0 for j in range(len(b)+1)] for i in range(len(a)+1)]
+    # row 0 and column 0 are initialized to 0 already
+    for i, x in enumerate(a):
+        for j, y in enumerate(b):
+            if x == y:
+                lengths[i+1][j+1] = lengths[i][j] + 1
+            else:
+                lengths[i+1][j+1] = max(lengths[i+1][j], lengths[i][j+1])
+    # read the substring out from the matrix
+    result = 0
+    x, y = len(a), len(b)
+    while x != 0 and y != 0:
+        if lengths[x][y] == lengths[x-1][y]:
+            x -= 1
+        elif lengths[x][y] == lengths[x][y-1]:
+            y -= 1
+        else:
+            assert a[x-1] == b[y-1]
+            result += 1
+            x -= 1
+            y -= 1
+    return result
 
 
 def examine(model, args):
@@ -353,11 +418,12 @@ def examine(model, args):
 
 def visualize(model, args):
     if args.snapshot is None:
-        epoch = load_last_snapshot(model, args.workspace)
+        # epoch = load_last_snapshot(model, args.workspace)
+        pass
     else:
         epoch = args.snapshot
         load_snapshot(model, args.workspace, epoch)
-    logging.info('Loaded epoch: ' + epoch)
+        logging.info('Loaded epoch: ' + epoch)
 
     if args.focus:
         if args.spotlight_model == 'markov':
@@ -367,7 +433,8 @@ def visualize(model, args):
         load_snapshot(agent, args.workspace, args.focus)
 
     cat = dataprep.get_cat(model.args.words)
-    img = dataprep.load_img(args.input).unsqueeze(0)
+    img = dataprep.load_img(args.input, (args.W, args.H),
+                            not args.colored).unsqueeze(0)
     img = var(img, volatile=True)
     h, h_img, s = model.get_initial_state(img)
     if args.focus:
@@ -387,7 +454,7 @@ def visualize(model, args):
             s, sh = agent(s, c, sh)
             y, h, alpha, c = model(x, h, h_img, s)
         else:
-            y, h, alpha = model(x, h, h_img)
+            y, h, alpha, _ = model(x, h, h_img)
 
         if args.focus:
             v = torch.zeros(3)
@@ -399,7 +466,14 @@ def visualize(model, args):
         if y[0] == 0:
             break
         print(cat.get_original(y)[0])
-        plt.matshow(alpha[0].data.numpy())
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        #a = -F.sigmoid(alpha[0] / 10)
+        a = -alpha[0]
+        cax = ax.matshow(a.data.numpy(), cmap='RdYlBu',
+                         interpolation='gaussian')
+        fig.colorbar(cax)
+        fig.show()
         x = var(y).unsqueeze(0)
         plt.show()
 
@@ -435,7 +509,6 @@ def reinforce(model, args):
         # TODO: validate
 
 
-# deprecated
 def pretrain_attention(model, args):
     if args.snapshot is None:
         epoch = load_last_snapshot(model, args.workspace)
@@ -454,7 +527,7 @@ def pretrain_attention(model, args):
         data, cat = dataprep.get_melody()
     else:
         data, cat = dataprep.get_formula()
-    data, _ = data.split(0.9)
+    data, _ = data.split(args.split_frac)
 
     if use_cuda:
         model.cuda()
@@ -462,8 +535,8 @@ def pretrain_attention(model, args):
 
     model.suspend_focus = True
 
-    optim = torch.optim.Adam(model.parameters(), weight_decay=1e-5)
-    agent_optim = torch.optim.Adam(agent.parameters(), weight_decay=1e-5)
+    optim = torch.optim.Adam(model.parameters(), weight_decay=args.norm)
+    agent_optim = torch.optim.Adam(agent.parameters(), weight_decay=args.norm)
 
     for epoch in range(args.epochs):
         N = 0
@@ -498,7 +571,7 @@ def pretrain_attention(model, args):
             for i in range(L + 1):
                 n += 1
                 s_pred, sh = agent(s, var(c.data), sh)
-                y_pred, h, alpha, c = model(x[i:i + 1, :], h, h_img, 'get')
+                y_pred, h, alpha, c = model(x[i:i + 1, :], h, h_img)
                 loss += F.cross_entropy(y_pred, y_true[i])
 
                 s = var(c[:, -3:].data)
@@ -530,3 +603,137 @@ def pretrain_attention(model, args):
 
         save_snapshot(model, args.workspace, 'focus.' + str(epoch + 1))
         save_snapshot(agent, args.workspace, 'agent.pre.' + str(epoch + 1))
+
+
+def rf(model, args):
+    if args.snapshot is None:
+        start_epoch = 0
+    else:
+        epoch = args.snapshot
+        load_snapshot(model, args.workspace, epoch)
+        logging.info('Loaded ' + str(epoch))
+        start_epoch = int(epoch.split('.')[-1])
+
+    if args.spotlight_model == 'markov':
+        agent = MarkovPolicy(model.hidden_size + model.img_size + 3)
+    elif args.spotlight_model == 'rnn':
+        agent = RNNPolicy(model.hidden_size + model.img_size + 3, 32)
+    else:
+        agent = None
+
+    if args.focus is not None:
+        load_snapshot(agent, args.workspace, args.focus)
+        logging.info('Loaded ' + str(args.focus))
+
+    logging.info('Loading data...')
+    if args.dataset == 'melody':
+        data, cat = dataprep.get_melody()
+    elif args.dataset == 'formula':
+        data, cat = dataprep.get_formula()
+    else:
+        data, cat = dataprep.get_recog(args.dataset)
+    if args.split_frac > 0:
+        data, _ = data.split(args.split_frac)
+
+    if use_cuda:
+        model.cuda()
+        if agent:
+            agent.cuda()
+
+    if agent:
+        optim = torch.optim.Adam(model.output.parameters(),
+                                 weight_decay=args.norm)
+        agent_optim = torch.optim.Adam(agent.parameters(),
+                                       weight_decay=args.norm)
+    else:
+        optim = torch.optim.Adam(model.output.parameters(),
+                                 weight_decay=args.norm)
+
+    for epoch in range(start_epoch, args.epochs):
+        N = 0
+        loss = 0.
+        agent_loss = 0.
+        total_loss = 0.
+        total_agent_loss = 0.
+        n = 0
+        then = time.time()
+
+        for keys, item in data.shuffle().epoch(1, backend='torch'):
+            N += 1
+
+            sentence = item.y
+            L = sentence.size(1)
+
+            null = torch.zeros(1, 1).type_as(sentence)
+            beg = torch.zeros(1, 1).type_as(sentence) + 1
+            x = var(torch.cat([beg, sentence], dim=1)).permute(1, 0)
+            y_true = var(torch.cat([sentence, null], dim=1).permute(1, 0))
+
+            h, h_img, s = model.get_initial_state(var(item.file))
+
+            if agent:
+                sh = agent.default_h()
+                size = (h_img.size(0), h_img.size(1) * h_img.size(2),
+                        h_img.size(3))
+                c = torch.cat([h.squeeze(0),
+                               h_img.view(*size).max(1)[0],
+                               s], dim=1)
+
+            for i in range(L + 1):
+                n += 1
+                if agent:
+                    if len(item) == 5:
+                        if i != L:
+                            xx, yy = item.pos[0][i][1:-1].split(',')
+                            xx = float(xx)
+                            yy = float(yy)
+                            sigma = -3.
+                            s_true = torch.Tensor([[xx, yy, sigma]])
+                        else:
+                            s_true = s.data
+                        s_pred, sh = agent(s, var(c.data), sh)
+                        y_pred, h, alpha, c = model(x[i:i + 1, :],
+                                                    h, h_img, var(s_true))
+                        agent_loss += F.smooth_l1_loss(s_pred, var(s_true))
+                        s = var(s_true)
+                    else:
+                        s_pred, sh = agent(s, var(c.data), sh)
+                        y_pred, h, alpha, c = model(x[i:i + 1, :],
+                                                    h, h_img, s_pred)
+                        s = s_pred
+                else:
+                    y_pred, h, alpha = model(x[i:i + 1, :], h, h_img)
+                loss += F.cross_entropy(y_pred, y_true[i])
+
+            if N % args.batch_size == 0:
+                total_loss += loss.data[0]
+                if type(agent_loss) != float:
+                    total_agent_loss += agent_loss.data[0]
+
+                optim.zero_grad()
+                if agent:
+                    agent_optim.zero_grad()
+                loss.backward()
+
+                if type(agent_loss) != float:
+                    agent_loss.backward()
+
+                optim.step()
+                if agent:
+                    agent_optim.step()
+
+                loss = 0.
+                agent_loss = 0.
+
+                now = time.time()
+                duration = (now - then) / 60
+                logging.info('[%d:%d] (%.2f samples/min) '
+                             'loss %.6f, agent_loss %.6f' %
+                             (epoch, N, args.batch_size / duration,
+                              total_loss / n,
+                              total_agent_loss / n))
+                then = now
+
+        save_snapshot(model, args.workspace, 'main.' + str(epoch + 1))
+        if agent:
+            save_snapshot(agent, args.workspace, 'agent.' + str(epoch + 1))

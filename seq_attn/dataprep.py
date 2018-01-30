@@ -8,11 +8,26 @@ IMG_DIR = 'data/short_imgs'
 
 
 def get_recog(name):
+    if name.startswith('iiit'):
+        return get_iiit5k(name)
     cat = Categorical()
     dict = open('data/chars.txt').read().strip().split('\n')
     cat.load_dict(dict)
     labels = TableLoader('data/%s_label.txt' % name, key='uuid',
                          fields={'label->y': cat(Chars())})
+
+    imgs = DirectoryLoader('data/' + name, Image((128, 64)))
+    data = DataLoader(imgs, labels)
+    return data, cat
+
+
+def get_iiit5k(name):
+    cat = Categorical()
+    dict = open('data/chars.txt').read().strip().split('\n')
+    cat.load_dict(dict)
+    labels = TableLoader('data/%s_label.txt' % name, key='uuid',
+                         fields={'label->y': cat(Chars()),
+                                 'pos': Words(';')})
 
     imgs = DirectoryLoader('data/' + name, Image((128, 64)))
     data = DataLoader(imgs, labels)
@@ -37,7 +52,7 @@ def get_formula(label=False, use_token=True):
     # if label:
     #     return labels, cat
 
-    imgs = DirectoryLoader(IMG_DIR, Image((256, 128), gray_scale=True))
+    imgs = DirectoryLoader(IMG_DIR, Image((256, 128), True))
     data = DataLoader(imgs, labels)
     return data, cat
 
@@ -53,7 +68,7 @@ def get_melody():
     # if label:
     #     return labels, cat
 
-    imgs = DirectoryLoader('data/melody', Image((256, 128), gray_scale=True))
+    imgs = DirectoryLoader('data/melody', Image((256, 128), True))
     data = DataLoader(imgs, labels)
     return data, cat
 
@@ -65,11 +80,15 @@ def get_cat(dict_file):
     return cat
 
 
-def load_img(filename, size=(256, 128)):
-    im = Image(size, gray_scale=True).apply(None, filename)
+def load_img(filename, size, gray_scale):
+    im = Image(size, gray_scale).apply(None, filename)
     return ToTensor()(im)
 
 
 if __name__ == '__main__':
-    data, cat = get_recog('svt_test')
-    print(len(data.keys))
+    data, cat = get_formula(use_token=False)
+    avg = []
+    for key in data.keys:
+        avg.append(len(data.get(key).y))
+    import numpy as np
+    print(np.mean(avg))

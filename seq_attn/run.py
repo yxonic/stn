@@ -12,7 +12,7 @@ from .util import *
 from .commands import *
 
 commands = ['config', 'train', 'batched', 'rf', 'test',
-            'examine', 'vis', 'clean']
+            'examine', 'vis', 'clean', 'pretrain']
 models = ['Attn', 'Spotlight']
 
 
@@ -67,13 +67,15 @@ class Train:
     def __init__(self, parser):
         parser.add_argument('-r', '--split_frac', type=float, default=0.9,
                             help='train/test split fraction')
+        parser.add_argument('-n', '--norm', type=float, default=1e-5,
+                            help='normalization factor')
         parser.add_argument('-N', '--epochs', type=int, default=10,
                             help='number of epochs to train')
         parser.add_argument('-bz', '--batch_size', type=int, default=16,
                             help='batch size')
         parser.add_argument('-d', '--dataset', default='formula',
                             choices=['formula', 'melody',
-                                     'svt_train', 'iiit_train'],
+                                     'svt_train', 'iiit5k_train'],
                             help='dataset')
         parser.add_argument('-s', '--snapshot', help='model snapshot')
         parser.add_argument('-f', '--focus', help='focus module snapshot')
@@ -95,16 +97,53 @@ class Train:
         train(model, args)
 
 
+class Pretrain:
+    def __init__(self, parser):
+        parser.add_argument('-r', '--split_frac', type=float, default=0.9,
+                            help='train/test split fraction')
+        parser.add_argument('-n', '--norm', type=float, default=1e-5,
+                            help='normalization factor')
+        parser.add_argument('-N', '--epochs', type=int, default=10,
+                            help='number of epochs to train')
+        parser.add_argument('-bz', '--batch_size', type=int, default=16,
+                            help='batch size')
+        parser.add_argument('-d', '--dataset', default='formula',
+                            choices=['formula', 'melody',
+                                     'svt_train', 'iiit5k_train'],
+                            help='dataset')
+        parser.add_argument('-s', '--snapshot', help='model snapshot')
+        parser.add_argument('-f', '--focus', help='focus module snapshot')
+        parser.add_argument('-m', '--spotlight_model', default='none',
+                            choices=['markov', 'rnn', 'none'],
+                            help='spotlight model')
+
+    def run(self, args):
+        for name in os.listdir(args.workspace):
+            if name.endswith('.json'):
+                Model = get_class(name.split('.')[0])
+                config = os.path.join(args.workspace, name)
+                break
+        else:
+            print('you must run config first!')
+            sys.exit(1)
+
+        model = load_config(Model, config)
+        pretrain_attention(model, args)
+
+
 class Batched:
     def __init__(self, parser):
         parser.add_argument('-r', '--split_frac', type=float, default=0.9,
                             help='train/test split fraction')
+        parser.add_argument('-n', '--norm', type=float, default=1e-5,
+                            help='normalization factor')
         parser.add_argument('-N', '--epochs', type=int, default=10,
                             help='number of epochs to train')
         parser.add_argument('-bz', '--batch_size', type=int, default=64,
                             help='batch size')
         parser.add_argument('-d', '--dataset', default='full',
-                            choices=['sample', 'short', 'full', 'melody'],
+                            choices=['formula', 'melody',
+                                     'svt_train', 'iiit5k_train'],
                             help='dataset')
 
     def run(self, args):
@@ -129,12 +168,14 @@ class Test:
                             help='model snapshot to test with')
         parser.add_argument('-d', '--dataset', default='formula',
                             choices=['formula', 'melody', 'svt_train',
-                                     'svt_test', 'iiit_test'],
+                                     'svt_test', 'iiit5k_test',
+                                     'iiit5k_train'],
                             help='dataset')
         parser.add_argument('-f', '--focus', help='focus module')
         parser.add_argument('-m', '--spotlight_model', default='rnn',
                             choices=['markov', 'rnn'],
                             help='spotlight model')
+        parser.add_argument('--lcs', action='store_true', help='lcs')
 
     def run(self, args):
         for name in os.listdir(args.workspace):
@@ -213,6 +254,10 @@ class Vis:
         parser.add_argument('-m', '--spotlight_model', default='rnn',
                             choices=['markov', 'rnn'],
                             help='spotlight model')
+        parser.add_argument('-W', type=int, help='width')
+        parser.add_argument('-H', type=int, help='height')
+        parser.add_argument('--colored', action='store_true',
+                            help='preserve color')
 
     def run(self, args):
         for name in os.listdir(args.workspace):

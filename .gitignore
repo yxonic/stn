@@ -1,6 +1,7 @@
 data/
 ws/
 final/
+exp*/
 __pycache__/
 *.pyc
 .DS_Store
@@ -9,3 +10,5 @@ __pycache__/
 
 deploy.sh
 fetch.sh
+
+loss.pdf
