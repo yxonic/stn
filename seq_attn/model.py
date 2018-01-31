@@ -38,21 +38,25 @@ class Attn(nn.Module):
         self.emb_size = args.emb_size
         self.hidden_size = args.hidden_size
         self.attention = args.attention
+        self.pos_emb = args.pos_emb
 
         # initialize layers
         if args.vision == 'vgg':
-            self.vision_model = SimpleVGG(self.img_size, args.pos_emb)
+            self.vision_model = SimpleVGG(self.img_size)
         else:
             if args.img_size != 128:
                 logging.warn('ResNet feature size is fixed at 128')
-            self.vision_model = SimpleResNet(args.pos_emb)
+            self.vision_model = SimpleResNet()
+
+        if self.pos_emb:
+            self.img_size += 2
 
         self.emb = nn.Embedding(self.wcnt, self.emb_size)
         self.rnn = nn.GRU(self.emb_size + self.img_size, self.hidden_size)
 
         # self.attn = nn.Linear(self.hidden_size + self.img_size, 1)
         if self.attention == 'fc':
-            self.attn = AttnLayer(self.hidden_size + self.img_size)
+            self.attn = FF(self.hidden_size + self.img_size)
 
         self.output = nn.Linear(self.hidden_size, self.wcnt)
 
@@ -61,7 +65,16 @@ class Attn(nn.Module):
         Inputs: img (batch, channel, H, W)
         Outputs: h_img (batch, H // 8, W // 8, img_size)
         """
-        return self.vision_model(img).permute(0, 2, 3, 1)
+        emb = self.vision_model(img).permute(0, 2, 3, 1)
+        if self.pos_emb:
+            sz = list(emb.size())
+            H = sz[1]
+            W = sz[2]
+            sz[3] = 1
+            i_layer = var(torch.arange(H) / H).view(1, H, 1, 1).expand(*sz)
+            j_layer = var(torch.arange(W) / W).view(1, 1, W, 1).expand(*sz)
+            emb = torch.cat([emb, i_layer, j_layer], dim=3)
+        return emb
 
     def get_initial_state(self, img):
         """
@@ -83,7 +96,7 @@ class Attn(nn.Module):
         _, h = self.rnn(torch.cat([z, h_attn.view(-1, 1,
                                                   self.img_size)], dim=2), h_)
         y = self.output(h.squeeze(0))
-        return y, h, alpha, h
+        return y, h, alpha, h.squeeze(0)
 
     def _get_context(self, hs, h_imgs):
         """
@@ -166,7 +179,7 @@ class Spotlight(nn.Module):
 
         # self.attn = nn.Linear(self.hidden_size + self.img_size, 1)
         if self.attention == 'fc':
-            self.attn = AttnLayer(self.hidden_size + self.img_size)
+            self.attn = FF(self.hidden_size + self.img_size)
 
         # self.policy = nn.Linear(self.hidden_size + self.img_size + 3, 3)
         # self.value = nn.Linear(self.hidden_size + self.img_size + 6, 1)
@@ -287,7 +300,7 @@ class Spotlight(nn.Module):
         return a.unsqueeze(0)
 
 
-class AttnLayer(nn.Module):
+class FF(nn.Module):
     def __init__(self, input_size, hidden_size=32):
         super().__init__()
         self.input_size = input_size
@@ -296,16 +309,15 @@ class AttnLayer(nn.Module):
         self.l2 = nn.Linear(hidden_size, 1)
 
     def forward(self, x):
-        y = F.tanh(self.l1(x))
-        return self.l2(y)
+        x = F.tanh(self.l1(x))
+        return self.l2(x)
 
 
 class Vision(nn.Module):
-    def __init__(self, out_dim, pos_emb=False):
+    def __init__(self, out_dim):
         super().__init__()
         self.out_dim = out_dim
         self.model = None
-        self.pos_emb = pos_emb
 
     def forward(self, x):
         """
@@ -314,31 +326,24 @@ class Vision(nn.Module):
         """
         x = 1. - x
 
-        if self.pos_emb:
-            H = x.size(2)
-            W = x.size(3)
-            i_layer = var(torch.arange(H) / H).view(1, 1, H, 1).expand_as(x)
-            j_layer = var(torch.arange(W) / W).view(1, 1, 1, W).expand_as(x)
-            x = torch.cat([x, i_layer, j_layer], dim=1)
-        else:
-            size = list(x.size())
-            size[1] = 3
-            x = x.expand(*size)
+        size = list(x.size())
+        size[1] = 3
+        x = x.expand(*size)
 
         y = F.tanh(self.model(x))
         return y
 
 
 class SimpleVGG(Vision):
-    def __init__(self, out_dim, pos_emb=False):
-        super().__init__(out_dim, pos_emb)
+    def __init__(self, out_dim):
+        super().__init__(out_dim)
         cfg = [8, 16, 'M', 32, 32, 'M', 64, out_dim, 'M']
         self.model = make_layers(cfg, batch_norm=True)
 
 
 class SimpleResNet(Vision):
-    def __init__(self, pos_emb=False):
-        super().__init__(128, pos_emb)
+    def __init__(self):
+        super().__init__(128)
         res = resnet18()
         self.model = nn.Sequential(*list(res.children())[:-4])
 
