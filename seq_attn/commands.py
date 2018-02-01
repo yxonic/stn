@@ -66,7 +66,12 @@ def train(model, args):
                                                backend='torch'):
             N += len(keys)
 
-            sentences, lens = item.y
+            if len(item.y) != 2:
+                sentences = item.y
+                lens = [item.y.size(1)] * item.y.size(0)
+            else:
+                sentences, lens = item.y
+
             hs, h_imgs, ss = model.get_initial_state(var(item.file))
 
             loss = 0.
@@ -93,6 +98,9 @@ def train(model, args):
                 for i in range(L + 1):
                     n += 1
                     if agent:
+                        h = model.get_h(x[i:i + 1, :], h)
+                        c = torch.cat([h.view(1, -1),
+                                       c[:, model.hidden_size:]], dim=1)
                         if len(item) == 5:
                             if i != L:
                                 xx, yy = item.pos[k][i][1:-1].split(',')
@@ -103,15 +111,13 @@ def train(model, args):
                             else:
                                 s_true = s.data
                             s_pred, sh = agent(s, var(c.data), sh)
-                            y_pred, h, alpha, c = model(x[i:i + 1, :],
-                                                        h, h_img, var(s_true))
+                            y_pred, h, alpha, c = \
+                                model.put_h(h, h_img, var(s_true))
                             agent_loss += F.smooth_l1_loss(s_pred, var(s_true))
                             s = var(s_true)
                         else:
-                            s_pred, sh = agent(s, var(c.data), sh)
-                            y_pred, h, alpha, c = model(x[i:i + 1, :],
-                                                        h, h_img, s_pred)
-                            s = s_pred
+                            s, sh = agent(s, c, sh)
+                            y_pred, h, alpha, c = model.put_h(h, h_img, s)
                     else:
                         y_pred, h, alpha, _ = model(x[i:i + 1, :], h, h_img)
                     loss += F.cross_entropy(y_pred, y_true[i])
@@ -418,8 +424,10 @@ def test(model, args):
         pred_seq = []
         for i in range(L + 20):
             if args.focus:
+                h = model.get_h(y_, h)
+                c = torch.cat([h.view(1, -1), c[:, model.hidden_size:]], dim=1)
                 s, sh = agent(s, c, sh)
-                y_, h, alpha, c = model(y_, h, h_img, s)
+                y_, h, alpha, c = model.put_h(h, h_img, s)
             else:
                 y_, h, _, _ = model(y_, h, h_img)
             y_ = y_.max(1)[1]
@@ -572,8 +580,10 @@ def visualize(model, args):
     for _ in range(20):
         # y, h, alpha = model(x, h, h_img)
         if args.focus:
+            h = model.get_h(x, h)
+            c = torch.cat([h.view(1, -1), c[:, model.hidden_size:]], dim=1)
             s, sh = agent(s, c, sh)
-            y, h, alpha, c = model(x, h, h_img, s)
+            y, h, alpha, c = model.put_h(h, h_img, s)
         else:
             y, h, alpha, _ = model(x, h, h_img)
 

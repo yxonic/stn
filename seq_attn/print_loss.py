@@ -27,6 +27,7 @@ def get_loss(logs, from_epoch=0, to_epoch=30):
         elif epoch < last_epoch:
             epochs = []
             losses = []
+            last_epoch = epoch
         else:
             epochs.append(last_epoch)
             losses.append(buf)
@@ -43,7 +44,7 @@ if __name__ == '__main__':
     for i in range(len(sys.argv[1:]) // 2):
         name = sys.argv[i * 2 + 1]
         file = sys.argv[i * 2 + 2]
-        x, y = get_loss(list(open(file)), 2, 50)
+        x, y = get_loss(list(open(file)), 0, 50)
         plt.plot(x, y, label=name, antialiased=True, linewidth=0.5)
     plt.legend()
     fig = plt.gcf()

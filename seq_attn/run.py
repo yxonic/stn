@@ -67,7 +67,7 @@ class Train:
     def __init__(self, parser):
         parser.add_argument('-r', '--split_frac', type=float, default=0.9,
                             help='train/test split fraction')
-        parser.add_argument('-n', '--norm', type=float, default=1e-5,
+        parser.add_argument('-n', '--norm', type=float, default=0.005,
                             help='normalization factor')
         parser.add_argument('-N', '--epochs', type=int, default=10,
                             help='number of epochs to train')
@@ -101,7 +101,7 @@ class Pretrain:
     def __init__(self, parser):
         parser.add_argument('-r', '--split_frac', type=float, default=0.9,
                             help='train/test split fraction')
-        parser.add_argument('-n', '--norm', type=float, default=1e-5,
+        parser.add_argument('-n', '--norm', type=float, default=0.005,
                             help='normalization factor')
         parser.add_argument('-N', '--epochs', type=int, default=10,
                             help='number of epochs to train')
@@ -135,7 +135,7 @@ class Batched:
     def __init__(self, parser):
         parser.add_argument('-r', '--split_frac', type=float, default=0.9,
                             help='train/test split fraction')
-        parser.add_argument('-n', '--norm', type=float, default=1e-5,
+        parser.add_argument('-n', '--norm', type=float, default=0.005,
                             help='normalization factor')
         parser.add_argument('-N', '--epochs', type=int, default=10,
                             help='number of epochs to train')
@@ -254,8 +254,8 @@ class Vis:
         parser.add_argument('-m', '--spotlight_model', default='rnn',
                             choices=['markov', 'rnn'],
                             help='spotlight model')
-        parser.add_argument('-W', type=int, help='width')
-        parser.add_argument('-H', type=int, help='height')
+        parser.add_argument('-W', type=int, default=256, help='width')
+        parser.add_argument('-H', type=int, default=128, help='height')
         parser.add_argument('--colored', action='store_true',
                             help='preserve color')
 

@@ -174,6 +174,8 @@ class Spotlight(nn.Module):
                 logging.warn('ResNet feature size is fixed at 128')
             self.vision_model = SimpleResNet()
 
+        self.img_size += 2
+
         self.emb = nn.Embedding(self.wcnt, self.emb_size)
         self.rnn = nn.GRU(self.emb_size, self.hidden_size)
 
@@ -191,7 +193,15 @@ class Spotlight(nn.Module):
         Inputs: img (batch, channel, H, W)
         Outputs: h_img (batch, H // 8, W // 8, img_size)
         """
-        return self.vision_model(img).permute(0, 2, 3, 1)
+        emb = self.vision_model(img).permute(0, 2, 3, 1)
+        sz = list(emb.size())
+        H = sz[1]
+        W = sz[2]
+        sz[3] = 1
+        i_layer = var(torch.arange(H) / H).view(1, H, 1, 1).expand(*sz)
+        j_layer = var(torch.arange(W) / W).view(1, 1, W, 1).expand(*sz)
+        emb = torch.cat([emb, i_layer, j_layer], dim=3)
+        return emb
 
     def get_initial_state(self, img):
         """
@@ -216,6 +226,19 @@ class Spotlight(nn.Module):
         c = torch.cat([h.squeeze(0), h_attn, focus], dim=1)
         y = self.output(c)
         return y, h, alpha, c
+
+    def put_h(self, h, h_img, focus=None):
+        h_attn, alpha = self._get_context(h.squeeze(0), h_img, focus)
+        if focus is None:
+            focus = get_handle(alpha)
+        c = torch.cat([h.squeeze(0), h_attn, focus], dim=1)
+        y = self.output(c)
+        return y, h, alpha, c
+
+    def get_h(self, x, h_):
+        z = self.emb(x.view(1, 1))
+        _, h = self.rnn(z, h_)
+        return h
 
     def pred_on_batch(self, imgs, sentences, lens):
         """
