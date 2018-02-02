@@ -594,8 +594,6 @@ def visualize(model, args):
             # v.clamp_(0, 1)
             print(*v.numpy())
         y = y.data.max(1)[1]
-        if y[0] == 0:
-            break
         print(cat.get_original(y)[0])
         fig = plt.figure()
         ax = fig.add_subplot(111)
@@ -605,8 +603,10 @@ def visualize(model, args):
                          interpolation='gaussian')
         fig.colorbar(cax)
         fig.show()
-        x = var(y).unsqueeze(0)
         plt.show()
+        if y[0] == 0:
+            break
+        x = var(y).unsqueeze(0)
 
 
 def reinforce(model, args):

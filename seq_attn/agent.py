@@ -23,7 +23,7 @@ class MarkovPolicy(nn.Module):
         return None
 
     def default_c(self):
-        return self.initial_c.view(1, -1)
+        return torch.tanh(self.initial_c.view(1, -1))
 
 
 class RNNPolicy(nn.Module):
@@ -49,7 +49,7 @@ class RNNPolicy(nn.Module):
         return self.q(torch.cat([state, h.view(1, -1), action], dim=1))
 
     def default_h(self):
-        return self.initial_h.view(1, 1, -1)
+        return torch.tanh(self.initial_h.view(1, 1, -1))
 
     def default_c(self):
-        return self.initial_c.view(1, -1)
+        return torch.tanh(self.initial_c.view(1, -1))
