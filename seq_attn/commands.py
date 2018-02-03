@@ -21,10 +21,15 @@ def train(model, args):
         logging.info('Loaded ' + str(epoch))
         start_epoch = int(epoch.split('.')[-1])
 
+    if args.dataset == 'multiline':
+        agent_hs = 128
+    else:
+        agent_hs = 64
+
     if args.spotlight_model == 'markov':
         agent = MarkovPolicy(model.hidden_size + model.img_size + 3)
     elif args.spotlight_model == 'rnn':
-        agent = RNNPolicy(model.hidden_size + model.img_size + 3, 32)
+        agent = RNNPolicy(model.hidden_size + model.img_size + 3, agent_hs)
     else:
         agent = None
 
@@ -40,7 +45,7 @@ def train(model, args):
     # else:
     #     data, cat = dataprep.get_recog(args.dataset)
 
-    data, cat = dataprep.get_kdd_dataset(name)
+    data, cat = dataprep.get_kdd_dataset(args.dataset)
 
     if args.split_frac > 0:
         data, _ = data.split(args.split_frac)
@@ -167,7 +172,7 @@ def train_batched(model, args):
     #     data, _ = dataprep.get_formula()
 
     # data, _ = data.split(args.split_frac)
-    data, cat = dataprep.get_kdd_dataset(name)
+    data, cat = dataprep.get_kdd_dataset(args.dataset)
 
     optimizer = torch.optim.Adam(model.parameters(), weight_decay=args.norm)
 
@@ -248,7 +253,7 @@ def test(model, args):
     # else:
     #     data, cat = dataprep.get_recog(args.dataset)
 
-    data, cat = dataprep.get_kdd_dataset(name)
+    data, cat = dataprep.get_kdd_dataset(args.dataset)
 
     if args.split_frac > 0:
         _, data = data.split(args.split_frac)
@@ -259,11 +264,16 @@ def test(model, args):
         epoch = args.snapshot
         load_snapshot(model, args.workspace, epoch)
 
+    if args.dataset == 'multiline':
+        agent_hs = 32
+    else:
+        agent_hs = 64
+
     if args.focus:
         if args.spotlight_model == 'markov':
             agent = MarkovPolicy(model.hidden_size + model.img_size + 3)
         else:
-            agent = RNNPolicy(model.hidden_size + model.img_size + 3, 32)
+            agent = RNNPolicy(model.hidden_size + model.img_size + 3, agent_hs)
         load_snapshot(agent, args.workspace, args.focus)
 
     logging.info('loaded model at epoch %s', str(epoch))
@@ -436,11 +446,16 @@ def visualize(model, args):
         load_snapshot(model, args.workspace, epoch)
         logging.info('Loaded epoch: ' + epoch)
 
+    if args.dataset == 'multiline':
+        agent_hs = 128
+    else:
+        agent_hs = 64
+
     if args.focus:
         if args.spotlight_model == 'markov':
             agent = MarkovPolicy(model.hidden_size + model.img_size + 3)
         else:
-            agent = RNNPolicy(model.hidden_size + model.img_size + 3, 32)
+            agent = RNNPolicy(model.hidden_size + model.img_size + 3, agent_hs)
         load_snapshot(agent, args.workspace, args.focus)
 
     cat = dataprep.get_cat(model.args.words)

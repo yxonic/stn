@@ -353,7 +353,7 @@ class Vision(nn.Module):
         size[1] = 3
         x = x.expand(*size)
 
-        y = F.tanh(self.model(x))
+        y = self.model(x)
         return y
 
 

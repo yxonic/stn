@@ -19,6 +19,10 @@ def get_kdd_dataset(name):
         imgs = DirectoryLoader('data/' + name, Image((256, 128)))
 
     data = DataLoader(imgs, labels)
+
+    if name == 'formula':
+        data = data.sample(0.1)
+
     return data, cat
 
 

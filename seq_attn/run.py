@@ -73,7 +73,7 @@ class Train:
                             help='number of epochs to train')
         parser.add_argument('-bz', '--batch_size', type=int, default=16,
                             help='batch size')
-        parser.add_argument('-d', '--dataset', help='dataset',
+        parser.add_argument('-d', '--dataset', help='dataset', required=True,
                             choices=['formula', 'melody', 'multiline'])
         parser.add_argument('-s', '--snapshot', help='model snapshot')
         parser.add_argument('-f', '--focus', help='focus module snapshot')
@@ -137,7 +137,7 @@ class Batched:
                             help='number of epochs to train')
         parser.add_argument('-bz', '--batch_size', type=int, default=64,
                             help='batch size')
-        parser.add_argument('-d', '--dataset', help='dataset',
+        parser.add_argument('-d', '--dataset', help='dataset', required=True,
                             choices=['formula', 'melody', 'multiline'])
 
     def run(self, args):
@@ -160,7 +160,7 @@ class Test:
                             help='train/test split fraction')
         parser.add_argument('-s', '--snapshot',
                             help='model snapshot to test with')
-        parser.add_argument('-d', '--dataset', help='dataset',
+        parser.add_argument('-d', '--dataset', help='dataset', required=True,
                             choices=['formula', 'melody', 'multiline'])
         parser.add_argument('-f', '--focus', help='focus module')
         parser.add_argument('-m', '--spotlight_model', default='rnn',
