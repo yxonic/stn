@@ -73,10 +73,8 @@ class Train:
                             help='number of epochs to train')
         parser.add_argument('-bz', '--batch_size', type=int, default=16,
                             help='batch size')
-        parser.add_argument('-d', '--dataset', default='formula',
-                            choices=['formula', 'melody',
-                                     'svt_train', 'iiit5k_train'],
-                            help='dataset')
+        parser.add_argument('-d', '--dataset', help='dataset',
+                            choices=['formula', 'melody', 'multiline'])
         parser.add_argument('-s', '--snapshot', help='model snapshot')
         parser.add_argument('-f', '--focus', help='focus module snapshot')
         parser.add_argument('-m', '--spotlight_model', default='none',
@@ -107,10 +105,8 @@ class Pretrain:
                             help='number of epochs to train')
         parser.add_argument('-bz', '--batch_size', type=int, default=16,
                             help='batch size')
-        parser.add_argument('-d', '--dataset', default='formula',
-                            choices=['formula', 'melody',
-                                     'svt_train', 'iiit5k_train'],
-                            help='dataset')
+        parser.add_argument('-d', '--dataset', help='dataset',
+                            choices=['formula', 'melody', 'multiline'])
         parser.add_argument('-s', '--snapshot', help='model snapshot')
         parser.add_argument('-f', '--focus', help='focus module snapshot')
         parser.add_argument('-m', '--spotlight_model', default='none',
@@ -141,10 +137,8 @@ class Batched:
                             help='number of epochs to train')
         parser.add_argument('-bz', '--batch_size', type=int, default=64,
                             help='batch size')
-        parser.add_argument('-d', '--dataset', default='full',
-                            choices=['formula', 'melody',
-                                     'svt_train', 'iiit5k_train'],
-                            help='dataset')
+        parser.add_argument('-d', '--dataset', help='dataset',
+                            choices=['formula', 'melody', 'multiline'])
 
     def run(self, args):
         for name in os.listdir(args.workspace):
@@ -166,11 +160,8 @@ class Test:
                             help='train/test split fraction')
         parser.add_argument('-s', '--snapshot',
                             help='model snapshot to test with')
-        parser.add_argument('-d', '--dataset', default='formula',
-                            choices=['formula', 'melody', 'svt_train',
-                                     'svt_test', 'iiit5k_test',
-                                     'iiit5k_train'],
-                            help='dataset')
+        parser.add_argument('-d', '--dataset', help='dataset',
+                            choices=['formula', 'melody', 'multiline'])
         parser.add_argument('-f', '--focus', help='focus module')
         parser.add_argument('-m', '--spotlight_model', default='rnn',
                             choices=['markov', 'rnn'],

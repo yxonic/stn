@@ -318,7 +318,7 @@ class Spotlight(nn.Module):
         y_layer = F.sigmoid(focus[1]).view(1, 1).expand_as(a)
         sigma = F.sigmoid(focus[2]) ** 2 / 16 + 1e-6
         sigma_layer = sigma.view(1, 1).expand_as(a)
-        a = -((i_layer - x_layer) ** 2 / 4 +
+        a = -((i_layer - x_layer) ** 2 / (W / H) ** 2 +
               (j_layer - y_layer) ** 2) / sigma_layer
         return a.unsqueeze(0)
 

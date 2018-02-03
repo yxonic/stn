@@ -7,6 +7,21 @@ from torchvision.transforms import ToTensor
 IMG_DIR = 'data/short_imgs'
 
 
+def get_kdd_dataset(name):
+    cat = Categorical()
+    dict = open('data/%s_words.txt' % name).read().strip().split('\n')
+    cat.load_dict(dict)
+    labels = TableLoader('data/%s_label.txt' % name, key='uuid',
+                         fields={'label->y': cat(Words(' '))})
+    if name == 'melody':
+        imgs = DirectoryLoader('data/' + name, Image((256, 64)))
+    else:
+        imgs = DirectoryLoader('data/' + name, Image((256, 128)))
+
+    data = DataLoader(imgs, labels)
+    return data, cat
+
+
 def get_recog(name):
     if name.startswith('iiit'):
         return get_iiit5k(name)
