@@ -14,9 +14,11 @@ def get_kdd_dataset(name):
     labels = TableLoader('data/%s_label.txt' % name, key='uuid',
                          fields={'label->y': cat(Words(' '))})
     if name == 'melody':
-        imgs = DirectoryLoader('data/' + name, Image((256, 64)))
+        imgs = DirectoryLoader('data/' + name, Image((256, 64), True))
+    elif name == 'formula':
+        imgs = DirectoryLoader('data/' + name, Image((128, 64), True))
     else:
-        imgs = DirectoryLoader('data/' + name, Image((256, 128)))
+        imgs = DirectoryLoader('data/' + name, Image((128, 128), True))
 
     data = DataLoader(imgs, labels)
 

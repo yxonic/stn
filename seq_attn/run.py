@@ -247,6 +247,8 @@ class Vis:
                             help='spotlight model')
         parser.add_argument('-W', type=int, default=256, help='width')
         parser.add_argument('-H', type=int, default=128, help='height')
+        parser.add_argument('--agent_hs', type=int, default=128,
+                            help='agent hidden size')
         parser.add_argument('--colored', action='store_true',
                             help='preserve color')
 

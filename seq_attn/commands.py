@@ -265,7 +265,7 @@ def test(model, args):
         load_snapshot(model, args.workspace, epoch)
 
     if args.dataset == 'multiline':
-        agent_hs = 32
+        agent_hs = 128
     else:
         agent_hs = 64
 
@@ -309,7 +309,7 @@ def test(model, args):
 
         true_seq = []
         pred_seq = []
-        for i in range(L + 20):
+        for i in range(L * 2 + 20):
             if args.focus:
                 h = model.get_h(y_, h)
                 c = torch.cat([h.view(1, -1), c[:, model.hidden_size:]], dim=1)
@@ -446,11 +446,7 @@ def visualize(model, args):
         load_snapshot(model, args.workspace, epoch)
         logging.info('Loaded epoch: ' + epoch)
 
-    if args.dataset == 'multiline':
-        agent_hs = 128
-    else:
-        agent_hs = 64
-
+    agent_hs = args.agent_hs
     if args.focus:
         if args.spotlight_model == 'markov':
             agent = MarkovPolicy(model.hidden_size + model.img_size + 3)

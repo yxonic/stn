@@ -8,13 +8,15 @@ class MarkovPolicy(nn.Module):
     def __init__(self, state_size):
         super().__init__()
         self.state_size = state_size
-        self.pi = nn.Linear(state_size, 3)
+        self.internal = nn.Linear(state_size, 64)
+        self.pi = nn.Linear(64, 3)
         self.q = nn.Linear(state_size + 3, 1)
         self.initial_c = nn.Parameter(torch.zeros(state_size))
         self.initial_c.data.uniform_(-2., 0.)
 
     def forward(self, s_, state, h_):
-        return self.pi(state), None
+        y = torch.tanh(self.internal(state))
+        return self.pi(y), None
 
     def value(self, state, action, h_):
         return self.q(torch.cat([state, action], dim=1))
