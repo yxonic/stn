@@ -20,8 +20,11 @@ def get_loss(logs, from_epoch=0, to_epoch=30):
         lo = loss_pat.search(line)
         if eo is None or lo is None:
             continue
-        epoch = int(eo.group(1))
-        loss = float(lo.group(1))
+        try:
+            epoch = int(eo.group(1))
+            loss = float(lo.group(1))
+        except ValueError:
+            continue
         if epoch == last_epoch:
             buf = loss
         elif epoch < last_epoch:
@@ -49,7 +52,8 @@ if __name__ == '__main__':
     for i in range(len(sys.argv[1:]) // 2):
         name = sys.argv[i * 2 + 1]
         file = sys.argv[i * 2 + 2]
-        x, y = get_loss(list(open(file)), 0, 25)
+        print(file)
+        x, y = get_loss(list(open(file)), 0, 19)
         plt.plot(x, y, '.-', label=name, antialiased=True, linewidth=1)
     plt.legend()
     fig = plt.gcf()

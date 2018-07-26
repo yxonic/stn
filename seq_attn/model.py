@@ -88,9 +88,7 @@ class Attn(nn.Module):
                 None)
 
     def forward(self, x, h_, h_img, focus_=None):
-        """
-        input one char, output next
-        """
+        """Input one char, output next."""
         z = self.emb(x.view(1, 1))
         h_attn, alpha = self._get_context(h_.squeeze(0), h_img)
         _, h = self.rnn(torch.cat([z, h_attn.view(-1, 1,
@@ -104,7 +102,6 @@ class Attn(nn.Module):
                 h_imgs (_, H, W, img_size)
         Outputs: h_attn (_, img_size), alpha (_, n)
         """
-
         isz = h_imgs.size(-1)
         hsz = hs.size(-1)
         n = h_imgs.size(1) * h_imgs.size(2)
@@ -316,7 +313,7 @@ class Spotlight(nn.Module):
         j_layer = var(torch.arange(W) / W).view(1, W).expand_as(a)
         x_layer = F.sigmoid(focus[0]).view(1, 1).expand_as(a)
         y_layer = F.sigmoid(focus[1]).view(1, 1).expand_as(a)
-        sigma = F.sigmoid(focus[2]) ** 2 / 16 + 1e-6
+        sigma = F.sigmoid(focus[2]) ** 2 / 4 + 1e-6
         sigma_layer = sigma.view(1, 1).expand_as(a)
         a = -((i_layer - x_layer) ** 2 / (W / H) ** 2 +
               (j_layer - y_layer) ** 2) / sigma_layer

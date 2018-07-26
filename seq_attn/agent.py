@@ -9,14 +9,14 @@ class MarkovPolicy(nn.Module):
         super().__init__()
         self.state_size = state_size
         self.internal = nn.Linear(state_size, 64)
-        self.pi = nn.Linear(64, 3)
+        self.pi = nn.Linear(state_size, 3)
         self.q = nn.Linear(state_size + 3, 1)
         self.initial_c = nn.Parameter(torch.zeros(state_size))
-        self.initial_c.data.uniform_(-2., 0.)
+        self.initial_c.data.uniform_(-1., 1.)
 
     def forward(self, s_, state, h_):
-        y = torch.tanh(self.internal(state))
-        return self.pi(y), None
+        # y = torch.tanh(self.internal(state))
+        return self.pi(state), None
 
     def value(self, state, action, h_):
         return self.q(torch.cat([state, action], dim=1))
@@ -38,9 +38,9 @@ class RNNPolicy(nn.Module):
         self.value = nn.Linear(state_size + hidden_size + 3, 1)
 
         self.initial_h = nn.Parameter(torch.zeros(self.hidden_size))
-        self.initial_h.data.uniform_(-2., 0)
+        self.initial_h.data.uniform_(-1., 1.)
         self.initial_c = nn.Parameter(torch.zeros(state_size))
-        self.initial_c.data.uniform_(-2., 0)
+        self.initial_c.data.uniform_(-1., 1.)
 
     def forward(self, s_, state, h_):
         _, h = self.rnn(s_.view(1, 1, 3), h_)

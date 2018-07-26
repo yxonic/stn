@@ -67,7 +67,7 @@ class Train:
     def __init__(self, parser):
         parser.add_argument('-r', '--split_frac', type=float, default=0.9,
                             help='train/test split fraction')
-        parser.add_argument('-n', '--norm', type=float, default=0.005,
+        parser.add_argument('-n', '--norm', type=float, default=0.05,
                             help='normalization factor')
         parser.add_argument('-N', '--epochs', type=int, default=10,
                             help='number of epochs to train')

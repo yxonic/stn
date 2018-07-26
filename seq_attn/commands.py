@@ -13,6 +13,7 @@ from .agent import *
 
 
 def train(model, args):
+    model.train()
     if args.snapshot is None:
         start_epoch = 0
     else:
@@ -45,7 +46,7 @@ def train(model, args):
     # else:
     #     data, cat = dataprep.get_recog(args.dataset)
 
-    data, cat = dataprep.get_kdd_dataset(args.dataset)
+    data, cat = dataprep.get_kdd_dataset(args.dataset, args.spotlight_model)
 
     if args.split_frac > 0:
         data, _ = data.split(args.split_frac)
@@ -58,6 +59,8 @@ def train(model, args):
     if agent:
         optim = torch.optim.Adam(model.parameters(),
                                  weight_decay=args.norm)
+        optim_output = torch.optim.Adam(model.output.parameters(),
+                                        weight_decay=args.norm)
         agent_optim = torch.optim.Adam(agent.parameters(),
                                        weight_decay=args.norm)
     else:
@@ -74,7 +77,7 @@ def train(model, args):
                                                backend='torch'):
             N += len(keys)
 
-            if len(item.y) != 2:
+            if type(item.y) != tuple:
                 sentences = item.y
                 lens = [item.y.size(1)] * item.y.size(0)
             else:
@@ -157,12 +160,99 @@ def train(model, args):
                           total_loss / n,
                           total_agent_loss / n))
 
+        if False:
+            for keys, item in data.sample(0.05).epoch(args.batch_size,
+                                                      backend='torch'):
+                N += len(keys)
+
+                if type(item.y) != tuple:
+                    sentences = item.y
+                    lens = [item.y.size(1)] * item.y.size(0)
+                else:
+                    sentences, lens = item.y
+
+                hs, h_imgs, ss = model.get_initial_state(var(item.file))
+
+                loss = 0.
+                agent_loss = 0.
+                then = time.time()
+
+                for k in range(len(keys)):
+                    sentence = sentences[k:k + 1, :lens[k]]
+                    L = sentence.size(1)
+
+                    null = torch.zeros(1, 1).type_as(sentence)
+                    beg = torch.zeros(1, 1).type_as(sentence) + 1
+                    x = var(torch.cat([beg, sentence], dim=1)).permute(1, 0)
+                    y_true = var(torch.cat([sentence, null], dim=1).permute(1, 0))
+
+                    h = hs[:, k:k + 1, :]
+                    h_img = h_imgs[k:k + 1, :, :, :]
+                    s = ss[k:k + 1, :] if ss is not None else None
+
+                    if agent:
+                        sh = agent.default_h()
+                        c = agent.default_c()
+
+                    for i in range(L + 1):
+                        n += 1
+                        if agent:
+                            h = model.get_h(x[i:i + 1, :], h)
+                            c = torch.cat([h.view(1, -1),
+                                           c[:, model.hidden_size:]], dim=1)
+                            if len(item) == 5:
+                                if i != L:
+                                    xx, yy = item.pos[k][i][1:-1].split(',')
+                                    xx = float(xx)
+                                    yy = float(yy)
+                                    sigma = -3.
+                                    s_true = torch.Tensor([[xx, yy, sigma]])
+                                else:
+                                    s_true = s.data
+                                s_pred, sh = agent(s, var(c.data), sh)
+                                y_pred, h, alpha, c = \
+                                    model.put_h(h, h_img, var(s_true))
+                                agent_loss += F.smooth_l1_loss(s_pred, var(s_true))
+                                s = var(s_true)
+                            else:
+                                s, sh = agent(s, c, sh)
+                                y_pred, h, alpha, c = model.put_h(h, h_img, s)
+                        else:
+                            y_pred, h, alpha, _ = model(x[i:i + 1, :], h, h_img)
+                        loss += F.cross_entropy(y_pred, y_true[i])
+
+                total_loss += loss.data[0]
+                if type(agent_loss) != float:
+                    total_agent_loss += agent_loss.data[0]
+
+                optim_output.zero_grad()
+                agent_optim.zero_grad()
+
+                loss.backward()
+                if type(agent_loss) != float:
+                    agent_loss.backward()
+
+                optim_output.step()
+                agent_optim.step()
+
+                loss = 0.
+                agent_loss = 0.
+
+                now = time.time()
+                duration = (now - then) / 60
+                logging.info('[%d:%d/%d] (%.2f samples/min) '
+                             'loss %.6f, agent_loss %.6f' %
+                             (epoch, N, total, args.batch_size / duration,
+                              total_loss / n,
+                              total_agent_loss / n))
+
         save_snapshot(model, args.workspace, 'main.' + str(epoch + 1))
         if agent:
             save_snapshot(agent, args.workspace, 'agent.' + str(epoch + 1))
 
 
 def train_batched(model, args):
+    model.train()
     logging.info('model: %s, setup: %s' %
                  (type(model).__name__, str(model.args)))
 
@@ -241,6 +331,7 @@ def train_batched(model, args):
 
 
 def test(model, args):
+    model.eval()
     logging.info('model: %s, setup: %s' %
                  (type(model).__name__, str(model.args)))
 
@@ -253,7 +344,7 @@ def test(model, args):
     # else:
     #     data, cat = dataprep.get_recog(args.dataset)
 
-    data, cat = dataprep.get_kdd_dataset(args.dataset)
+    data, cat = dataprep.get_kdd_dataset(args.dataset, args.focus)
 
     if args.split_frac > 0:
         _, data = data.split(args.split_frac)
@@ -358,6 +449,7 @@ def lcs(a, b):
 
 
 def examine(model, args):
+    model.eval()
     logging.info('model: %s, setup: %s' %
                  (type(model).__name__, str(model.args)))
 
@@ -439,6 +531,7 @@ def examine(model, args):
 
 
 def visualize(model, args):
+    model.eval()
     if args.snapshot is None:
         epoch = load_last_snapshot(model, args.workspace)
     else:
@@ -466,7 +559,7 @@ def visualize(model, args):
     import matplotlib.pyplot as plt
 
     # print(next(model.focus_trans.parameters())[0].data.numpy())
-    for _ in range(20):
+    for _ in range(40):
         # y, h, alpha = model(x, h, h_img)
         if args.focus:
             h = model.get_h(x, h)
