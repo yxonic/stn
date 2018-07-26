@@ -13,6 +13,7 @@ from .agent import *
 
 
 def train(model, args):
+    r"""Train the model."""
     model.train()
     if args.snapshot is None:
         start_epoch = 0
