@@ -27,7 +27,10 @@ if __name__ == '__main__':
     fig = plt.figure(figsize=(13, 3))
     gs = gridspec.GridSpec(1, 5)
     ax = [plt.subplot(gs[x]) for x in range(5)]
-    f = lambda x: len(x.split(' '))
+
+    def f(x):
+        return len(x.split(' '))
+
     _main('melody', ax[0], 49, 50, 'b', '(a) Melody', f)
     _main('formula', ax[1], 49, 50, 'b', '(b) Formula', f)
     _main('multiline', ax[2], 50, 100, 'b', '(c) Multi-Line', f)

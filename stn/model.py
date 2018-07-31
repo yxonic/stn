@@ -268,7 +268,7 @@ class Spotlight(nn.Module):
         hsz = hs.size(-1)
         n = h_imgs.size(1) * h_imgs.size(2)
 
-        if self.attention == 'none' or type(focus) == torch.autograd.Variable:
+        if self.attention == 'none' or isinstance(focus, torch.Tensor):
             a = var(torch.zeros(h_imgs.size(0), n))
         elif self.attention == 'fc':
             target_sz = list(hs.size())

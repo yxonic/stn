@@ -17,6 +17,9 @@ models = ['Attn', 'Spotlight']
 
 
 class Config:
+    r"""Command ``config``.
+    """
+
     def __init__(self, parser):
         subs = parser.add_subparsers(title='models available', dest='model')
         subs.required = True
@@ -64,6 +67,9 @@ class Clean:
 
 
 class Train:
+    r"""Command ``train``.
+    """
+
     def __init__(self, parser):
         parser.add_argument('-r', '--split_frac', type=float, default=0.9,
                             help='train/test split fraction')
@@ -80,6 +86,9 @@ class Train:
         parser.add_argument('-m', '--spotlight_model', default='none',
                             choices=['markov', 'rnn', 'none'],
                             help='spotlight model')
+        parser.add_argument('--refine_each_epoch', action='store_true',
+                            help='do spotlight refinement at the end of each'
+                            'epoch')
 
     def run(self, args):
         for name in os.listdir(args.workspace):
@@ -128,6 +137,9 @@ class Pretrain:
 
 
 class Batched:
+    r"""Command ``batched``.
+    """
+
     def __init__(self, parser):
         parser.add_argument('-r', '--split_frac', type=float, default=0.9,
                             help='train/test split fraction')

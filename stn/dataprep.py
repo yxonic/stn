@@ -1,20 +1,26 @@
+"""Prepare data for training."""
+
+# TODO: discard yata...
 from yata.loaders import DirectoryLoader, TableLoader, DataLoader
 from yata.fields import Image, Chars, Words, Categorical
 
 from torchvision.transforms import ToTensor
 
 
-IMG_DIR = 'data/short_imgs'
-
-
 def get_kdd_dataset(name, large_image=False):
+    r"""Load datasets for KDD paper.
+
+    Args:
+        name(str): choose from formula, melody and multiline
+        large_image(bool): larger image size (Default: ``False``)
+    """
     cat = Categorical()
     dict = open('data/%s_words.txt' % name).read().strip().split('\n')
     cat.load_dict(dict)
     labels = TableLoader('data/%s_label.txt' % name, key='uuid',
                          fields={'label->y': cat(Words(' '))})
 
-    if False:
+    if large_image:
         if name == 'melody':
             imgs = DirectoryLoader('data/' + name, Image((128, 64), True))
         elif name == 'formula':
@@ -30,9 +36,6 @@ def get_kdd_dataset(name, large_image=False):
             imgs = DirectoryLoader('data/' + name, Image((64, 64), True))
 
     data = DataLoader(imgs, labels)
-
-    # if name == 'formula':
-    #     data, _ = data.split(0.1)
 
     return data, cat
 
@@ -82,7 +85,7 @@ def get_formula(label=False, use_token=True):
     # if label:
     #     return labels, cat
 
-    imgs = DirectoryLoader(IMG_DIR, Image((256, 128), True))
+    imgs = DirectoryLoader('data/formula', Image((256, 128), True))
     data = DataLoader(imgs, labels)
     return data, cat
 

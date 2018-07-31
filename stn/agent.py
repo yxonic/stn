@@ -1,3 +1,5 @@
+"""Spotlight control agents."""
+
 import torch
 import torch.nn as nn
 

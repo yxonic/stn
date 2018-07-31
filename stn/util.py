@@ -10,6 +10,7 @@ import sys
 from collections import defaultdict, deque
 
 use_cuda = torch.cuda.is_available()
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 def normalize(x):
